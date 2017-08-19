@@ -11,6 +11,11 @@
 
 #define DOMOTICZ_SERVICE_NAME "_domoticz._tcp.local"
 
+int mdnsQueryTimeout = 0;
+
+String domoticzPath = String("");
+String domoticzHostAndPort = String("");
+
 // wifi AP/config captive portal mode callback
 void wifiConfigCallback(WiFiManager *wiFiManager) {
     DEBUG_PRINT("Entered config mode");
@@ -38,13 +43,13 @@ void mdnsAnswerCallback(const mdns::Answer *answer) {
             int portInfoIndex = answerData.indexOf("port=");
             int hostInfoIndex = answerData.indexOf("host=");
 
-           // domoticzHostAndPort = String(answerData.substring(hostInfoIndex + 5) + ":" + answerData.substring(portInfoIndex + 5, hostInfoIndex - 1));
+            domoticzHostAndPort = String(answerData.substring(hostInfoIndex + 5) + ":" + answerData.substring(portInfoIndex + 5, hostInfoIndex - 1));
         } else if (answer->rrtype == 0x10) {
             // txt record answer
             //  RRDATA:    ␎path=/domoticz
             String answerData = String(answer->rdata_buffer);
             int pathInfoIndex = answerData.indexOf("path=");
-           // domoticzPath = String(answerData.substring(pathInfoIndex + 5));
+            domoticzPath = String(answerData.substring(pathInfoIndex + 5));
         }
     } else {
         DEBUG_PRINT("Got unrelated mDNS answer");
@@ -84,7 +89,7 @@ void setup() {
 
     WiFiManager wifiManager;
 
- // wifiManager.resetSettings();
+// wifiManager.resetSettings();
 
 #ifdef DEBUG
     wifiManager.setDebugOutput(true);
@@ -103,24 +108,24 @@ void setup() {
     DEBUG_PRINT("Wifi connected.");
 }
 
-int mdnsQueryTimeout = 0;
-
 void loop() {
+#ifdef DEBUG
     String msg = String("main loop");
     msg += ESP.getCycleCount();
     DEBUG_PRINT(msg);
+#endif
 
-
-
-    if (mdnsQueryTimeout == 0) {
-        sendMDNSQuery(DOMOTICZ_SERVICE_NAME);
-        mdnsQueryTimeout = 1;
+    if (domoticzPath == "" || domoticzHostAndPort == "") {
+        if (mdnsQueryTimeout == 0) {
+            sendMDNSQuery(DOMOTICZ_SERVICE_NAME);
+            mdnsQueryTimeout = 1;
+        }
+        DEBUG_PRINT("Waiting for mDNS answer...");
+        mdnsClient.loop();
+    } else {
+        DEBUG_PRINT("Domoticz server is at :");
+        DEBUG_PRINT("http://" + domoticzHostAndPort + domoticzPath);
     }
-    DEBUG_PRINT("Waiting for mDNS answer...");
-    mdnsClient.loop();
 
-
-
-    
     delay(1000);
 }
