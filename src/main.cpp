@@ -1,5 +1,6 @@
 #include <WiFiManager.h>
 #include <mdns.h>
+#include <ESP8266HTTPClient.h>
 
 #define DEBUG
 
@@ -14,7 +15,11 @@
 int mdnsQueryTimeout = 0;
 
 String domoticzPath = String("");
-String domoticzHostAndPort = String("");
+String domoticzHost = String("");
+String domoticzPort = String("");
+String domoticzAddress = String("");
+
+String hardwareId = String("");
 
 // wifi AP/config captive portal mode callback
 void wifiConfigCallback(WiFiManager *wiFiManager) {
@@ -36,20 +41,27 @@ void mdnsAnswerCallback(const mdns::Answer *answer) {
         answer->Display();
 #endif
 
-        if (answer->rrtype == 0x21) {
+        if (answer->rrtype == MDNS_TYPE_SRV) {
             // host / port answer
             // RRDATA:    p=0;w=0;port=8181;host=nas.local
             String answerData = String(answer->rdata_buffer);
             int portInfoIndex = answerData.indexOf("port=");
             int hostInfoIndex = answerData.indexOf("host=");
 
-            domoticzHostAndPort = String(answerData.substring(hostInfoIndex + 5) + ":" + answerData.substring(portInfoIndex + 5, hostInfoIndex - 1));
-        } else if (answer->rrtype == 0x10) {
+            domoticzHost = String(answerData.substring(hostInfoIndex + 5));
+            domoticzPort = String(answerData.substring(portInfoIndex + 5, hostInfoIndex - 1));
+        } else if (answer->rrtype == MDNS_TYPE_TXT) {
             // txt record answer
             //  RRDATA:    ␎path=/domoticz
             String answerData = String(answer->rdata_buffer);
             int pathInfoIndex = answerData.indexOf("path=");
             domoticzPath = String(answerData.substring(pathInfoIndex + 5));
+        }
+    } else if (answer->rrtype == MDNS_TYPE_A) {
+        DEBUG_PRINT("Got type A mDNS answer");
+        String answerName = String(answer->name_buffer);
+        if (answerName == domoticzHost) {
+            domoticzAddress = String(answer->rdata_buffer);
         }
     } else {
         DEBUG_PRINT("Got unrelated mDNS answer");
@@ -77,6 +89,30 @@ void sendMDNSQuery(const char *name) {
     mdnsClient.Clear();
     mdnsClient.AddQuery(q);
     mdnsClient.Send();
+}
+
+void fetchHardwareId() {
+    DEBUG_PRINT("Fetching hardware ID...");
+    String url = "http://";
+    url += domoticzAddress;
+    url += ":";
+    url += domoticzPort;
+    url += domoticzPath;
+    url += "/json.htm?type=hardware";
+
+    DEBUG_PRINT("Querying GET " + url);
+    HTTPClient http;
+    http.begin(url);
+    int httpCode = http.GET();
+    DEBUG_PRINT(httpCode);
+    if (httpCode == HTTP_CODE_OK) {
+        String payload = http.getString();
+        DEBUG_PRINT("Got hardware answer : ");
+        DEBUG_PRINT(payload);
+    } else {
+        DEBUG_PRINT("Could not get hardware ID : " + httpCode);
+    }
+    http.end();
 }
 
 void setup() {
@@ -115,16 +151,19 @@ void loop() {
     DEBUG_PRINT(msg);
 #endif
 
-    if (domoticzPath == "" || domoticzHostAndPort == "") {
+    if (domoticzPath == "" || domoticzPort == "" || domoticzAddress == "") {
         if (mdnsQueryTimeout == 0) {
             sendMDNSQuery(DOMOTICZ_SERVICE_NAME);
             mdnsQueryTimeout = 1;
         }
         DEBUG_PRINT("Waiting for mDNS answer...");
         mdnsClient.loop();
-    } else {
+    } else if (hardwareId == "") {
         DEBUG_PRINT("Domoticz server is at :");
-        DEBUG_PRINT("http://" + domoticzHostAndPort + domoticzPath);
+        DEBUG_PRINT("http://" + domoticzAddress + ":" + domoticzPort + domoticzPath);
+        fetchHardwareId();
+    } else {
+        DEBUG_PRINT("hardwareId is : " + hardwareId);
     }
 
     delay(1000);
