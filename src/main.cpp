@@ -1,6 +1,7 @@
 #include <WiFiManager.h>
 #include <mdns.h>
 #include <ESP8266HTTPClient.h>
+#include <ArduinoJson.h>
 
 #define DEBUG
 
@@ -20,6 +21,7 @@ String domoticzPort = String("");
 String domoticzAddress = String("");
 
 String hardwareId = String("");
+String deviceId = String("");
 
 // wifi AP/config captive portal mode callback
 void wifiConfigCallback(WiFiManager *wiFiManager) {
@@ -91,6 +93,75 @@ void sendMDNSQuery(const char *name) {
     mdnsClient.Send();
 }
 
+void declareHardware() {
+    String url = "http://";
+    url += domoticzAddress;
+    url += ":";
+    url += domoticzPort;
+    url += domoticzPath;
+    url += "/json.htm?type=command&param=addhardware&htype=15&enabled=true&datatimeout=0&name=";
+    url += "ESP_";
+    url += ESP.getChipId();
+
+    DEBUG_PRINT("Querying GET " + url);
+    HTTPClient http;
+    http.begin(url);
+    int httpCode = http.GET();
+    DEBUG_PRINT(httpCode);
+    if (httpCode == HTTP_CODE_OK) {
+        String payload = http.getString();
+        DEBUG_PRINT("Got hardware create answer : ");
+        DEBUG_PRINT(payload);
+
+        const size_t bufferSize = JSON_OBJECT_SIZE(3) + 40;
+        DynamicJsonBuffer jsonBuffer(bufferSize);
+        JsonObject& root = jsonBuffer.parseObject(payload);
+
+        hardwareId = String((const char*)root["idx"]);
+    } else {
+        DEBUG_PRINT("Could not create hardware : " + httpCode);
+    }
+    http.end();
+}
+
+void parseHardwareResponse(String json) {
+    int guessedHardwareCount = json.length() / 400;
+    const size_t bufferSize = JSON_ARRAY_SIZE(guessedHardwareCount) + JSON_OBJECT_SIZE(guessedHardwareCount) + guessedHardwareCount*JSON_OBJECT_SIZE(17) + json.length() / 2;
+    DynamicJsonBuffer jsonBuffer(bufferSize);
+
+    JsonObject& root = jsonBuffer.parseObject(json);
+    JsonArray& result = root["result"];
+
+    int hardwareCount = result.size();
+    DEBUG_PRINT("Found declared hardware count : ");
+    DEBUG_PRINT(hardwareCount);
+    DEBUG_PRINT("Searching for our id : ");
+    DEBUG_PRINT(ESP.getChipId());
+
+    int i = 0;
+    while (hardwareId == "" && i < hardwareCount) {
+        JsonObject& hardware = result[i++];
+        String hardwareName = String((const char*)hardware["Name"]);
+        String chipId = String(ESP.getChipId());
+        if (hardwareName.indexOf(chipId) >= 0) {
+            DEBUG_PRINT("Found matching hardware with name : ");
+            DEBUG_PRINT(hardwareName);
+            hardwareId = String((const char*)hardware["idx"]);
+        } else {
+            DEBUG_PRINT("Hardware name does not match : ");
+            DEBUG_PRINT(hardwareName);
+        }
+    }
+
+    if (hardwareId == "") {
+        DEBUG_PRINT("Hardware not declared yet, creating...");
+        declareHardware();
+    } else {
+        DEBUG_PRINT("Got hardware IDX : ");
+        DEBUG_PRINT(hardwareId);
+    }
+}
+
 void fetchHardwareId() {
     DEBUG_PRINT("Fetching hardware ID...");
     String url = "http://";
@@ -109,8 +180,99 @@ void fetchHardwareId() {
         String payload = http.getString();
         DEBUG_PRINT("Got hardware answer : ");
         DEBUG_PRINT(payload);
+        parseHardwareResponse(payload);
     } else {
         DEBUG_PRINT("Could not get hardware ID : " + httpCode);
+    }
+    http.end();
+}
+
+
+void declareDevice() {
+    String url = "http://";
+    url += domoticzAddress;
+    url += ":";
+    url += domoticzPort;
+    url += domoticzPath;
+    url += "/json.htm?type=createvirtualsensor&sensorname=Temperature&sensortype=82&idx=";
+    url += hardwareId;
+
+    DEBUG_PRINT("Querying GET " + url);
+    HTTPClient http;
+    http.begin(url);
+    int httpCode = http.GET();
+    DEBUG_PRINT(httpCode);
+    if (httpCode == HTTP_CODE_OK) {
+        String payload = http.getString();
+        DEBUG_PRINT("Got device create answer : ");
+        DEBUG_PRINT(payload);
+
+        const size_t bufferSize = JSON_OBJECT_SIZE(3) + 40;
+        DynamicJsonBuffer jsonBuffer(bufferSize);
+        JsonObject& root = jsonBuffer.parseObject(payload);
+
+        deviceId = String((const char*)root["idx"]);
+    } else {
+        DEBUG_PRINT("Could not create device : " + httpCode);
+    }
+    http.end();
+}
+
+void parseDevicesResponse(String json) {
+    int guessedDevicesCount = json.length() / 1200;
+    const size_t bufferSize = JSON_ARRAY_SIZE(guessedDevicesCount) + JSON_OBJECT_SIZE(guessedDevicesCount) + guessedDevicesCount*JSON_OBJECT_SIZE(36) + json.length();
+    DynamicJsonBuffer jsonBuffer(bufferSize);
+
+    JsonObject& root = jsonBuffer.parseObject(json);
+    JsonArray& result = root["result"];
+
+    int devicesCount = result.size();
+    DEBUG_PRINT("Found declared devices count : ");
+    DEBUG_PRINT(devicesCount);
+    DEBUG_PRINT("Searching for device with hardware id : ");
+    DEBUG_PRINT(hardwareId);
+
+    int i = 0;
+    while (deviceId == "" && i < devicesCount) {
+        JsonObject& device = result[i++];
+        String deviceName = String((const char*)device["Name"]);
+        String deviceHardwareId = String((const char*)device["HardwareID"]);
+        if (deviceHardwareId == hardwareId && deviceName == "Temperature") {
+            DEBUG_PRINT("Found matching device");
+            deviceId = String((const char*)device["idx"]);
+        }
+    }
+
+    if (deviceId == "") {
+        DEBUG_PRINT("Device not declared yet, creating...");
+        declareDevice();
+    } else {
+        DEBUG_PRINT("Got device IDX : ");
+        DEBUG_PRINT(deviceId);
+    }
+}
+
+void fetchDeviceId() {
+    DEBUG_PRINT("Fetching device ID...");
+    String url = "http://";
+    url += domoticzAddress;
+    url += ":";
+    url += domoticzPort;
+    url += domoticzPath;
+    url += "/json.htm?type=devices";
+
+    DEBUG_PRINT("Querying GET " + url);
+    HTTPClient http;
+    http.begin(url);
+    int httpCode = http.GET();
+    DEBUG_PRINT(httpCode);
+    if (httpCode == HTTP_CODE_OK) {
+        String payload = http.getString();
+        DEBUG_PRINT("Got devices answer : ");
+        DEBUG_PRINT(payload);
+        parseDevicesResponse(payload);
+    } else {
+        DEBUG_PRINT("Could not get device ID : " + httpCode);
     }
     http.end();
 }
@@ -162,8 +324,11 @@ void loop() {
         DEBUG_PRINT("Domoticz server is at :");
         DEBUG_PRINT("http://" + domoticzAddress + ":" + domoticzPort + domoticzPath);
         fetchHardwareId();
-    } else {
+    } else if (deviceId == "") {
         DEBUG_PRINT("hardwareId is : " + hardwareId);
+        fetchDeviceId();
+    } else {
+        DEBUG_PRINT("deviceId is : " + deviceId);
     }
 
     delay(1000);
