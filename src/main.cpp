@@ -2,6 +2,7 @@
 #include <mdns.h>
 #include <ESP8266HTTPClient.h>
 #include <ArduinoJson.h>
+#include <SimpleDHT.h>
 
 #define DEBUG
 
@@ -22,6 +23,10 @@ String domoticzAddress = String("");
 
 String hardwareId = String("");
 String deviceId = String("");
+
+SimpleDHT22 dht22;
+// pin D5
+#define DHT22_PIN 14
 
 // wifi AP/config captive portal mode callback
 void wifiConfigCallback(WiFiManager *wiFiManager) {
@@ -277,6 +282,44 @@ void fetchDeviceId() {
     http.end();
 }
 
+void readTemperature() {
+    float temperature = 0;
+    float humidity = 0;
+    int chk = dht22.read2(DHT22_PIN, &temperature, &humidity, NULL);
+    if (chk == SimpleDHTErrSuccess) {
+        DEBUG_PRINT("DHT read ok : ");
+        DEBUG_PRINT(temperature);
+        DEBUG_PRINT(humidity);
+
+        String url = "http://";
+        url += domoticzAddress;
+        url += ":";
+        url += domoticzPort;
+        url += domoticzPath;
+        url += "/json.htm?type=command&param=udevice&idx=";
+        url += deviceId;
+        url += "&nvalue=0&svalue=";
+        url += temperature;
+        url += ";";
+        url += humidity;
+        url += ";0";
+
+        DEBUG_PRINT("Querying GET " + url);
+        HTTPClient http;
+        http.begin(url);
+        int httpCode = http.GET();
+        if (httpCode == HTTP_CODE_OK) {
+            DEBUG_PRINT("Update sensor OK");
+        } else {
+            DEBUG_PRINT("Could not create device : " + httpCode);
+        }
+        http.end();
+    } else {
+        DEBUG_PRINT("DHT read error : ");
+        DEBUG_PRINT(chk);
+    }
+}
+
 void setup() {
 #ifdef DEBUG
     Serial.begin(115200);
@@ -308,8 +351,10 @@ void setup() {
 
 void loop() {
 #ifdef DEBUG
-    String msg = String("main loop");
+    String msg = String("main loop, cycle count:");
     msg += ESP.getCycleCount();
+    msg += " free heap:";
+    msg += ESP.getFreeHeap();
     DEBUG_PRINT(msg);
 #endif
 
@@ -320,6 +365,7 @@ void loop() {
         }
         DEBUG_PRINT("Waiting for mDNS answer...");
         mdnsClient.loop();
+        delay(1000);
     } else if (hardwareId == "") {
         DEBUG_PRINT("Domoticz server is at :");
         DEBUG_PRINT("http://" + domoticzAddress + ":" + domoticzPort + domoticzPath);
@@ -329,7 +375,7 @@ void loop() {
         fetchDeviceId();
     } else {
         DEBUG_PRINT("deviceId is : " + deviceId);
+        readTemperature();
+        delay(60*1000);
     }
-
-    delay(1000);
 }
