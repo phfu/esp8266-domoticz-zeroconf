@@ -4,6 +4,8 @@
 #include <ArduinoJson.h>
 #include <SimpleDHT.h>
 
+#include <ESP8266WiFi.h>
+
 #define DEBUG
 
 #ifdef DEBUG
@@ -16,10 +18,12 @@
 
 int mdnsQueryTimeout = 0;
 
-String domoticzPath = String("");
-String domoticzHost = String("");
-String domoticzPort = String("");
-String domoticzAddress = String("");
+// hardcoded to skip mDNS queries, because shitty wifi router :(
+// set to empty string to enable mDNS resolution
+String domoticzPath = String("/domoticz");
+String domoticzHost = String("nas.local");
+String domoticzPort = String("8181");
+String domoticzAddress = String("192.168.0.123");
 
 String hardwareId = String("");
 String deviceId = String("");
@@ -242,7 +246,7 @@ void parseDevicesResponse(String json) {
         JsonObject& device = result[i++];
         String deviceName = String((const char*)device["Name"]);
         String deviceHardwareId = String((const char*)device["HardwareID"]);
-        if (deviceHardwareId == hardwareId && deviceName == "Temperature") {
+        if (deviceHardwareId == hardwareId && deviceName.indexOf("Temperature") >= 0) {
             DEBUG_PRINT("Found matching device");
             deviceId = String((const char*)device["idx"]);
         }
@@ -264,7 +268,7 @@ void fetchDeviceId() {
     url += ":";
     url += domoticzPort;
     url += domoticzPath;
-    url += "/json.htm?type=devices";
+    url += "/json.htm?type=devices&filter=temp";
 
     DEBUG_PRINT("Querying GET " + url);
     HTTPClient http;
@@ -291,6 +295,9 @@ void readTemperature() {
         DEBUG_PRINT(temperature);
         DEBUG_PRINT(humidity);
 
+        DEBUG_PRINT("Wifi status :");
+        DEBUG_PRINT(WiFi.status());
+
         String url = "http://";
         url += domoticzAddress;
         url += ":";
@@ -309,9 +316,12 @@ void readTemperature() {
         http.begin(url);
         int httpCode = http.GET();
         if (httpCode == HTTP_CODE_OK) {
-            DEBUG_PRINT("Update sensor OK");
+            DEBUG_PRINT("Update sensor OK :");
+            String payload = http.getString();
+            DEBUG_PRINT(payload);
         } else {
-            DEBUG_PRINT("Could not create device : " + httpCode);
+            DEBUG_PRINT("Could not update sensor : ");
+            DEBUG_PRINT(http.errorToString(httpCode).c_str());
         }
         http.end();
     } else {
