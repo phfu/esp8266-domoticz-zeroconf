@@ -268,7 +268,7 @@ void fetchDeviceId() {
     url += ":";
     url += domoticzPort;
     url += domoticzPath;
-    url += "/json.htm?type=devices&filter=temp";
+    url += "/json.htm?type=devices&used=true&filter=temp";
 
     DEBUG_PRINT("Querying GET " + url);
     HTTPClient http;
