@@ -244,9 +244,9 @@ void parseDevicesResponse(String json) {
     int i = 0;
     while (deviceId == "" && i < devicesCount) {
         JsonObject& device = result[i++];
-        String deviceName = String((const char*)device["Name"]);
+        String deviceType = String((const char*)device["Type"]);
         String deviceHardwareId = String((const char*)device["HardwareID"]);
-        if (deviceHardwareId == hardwareId && deviceName.indexOf("Temperature") >= 0) {
+        if (deviceHardwareId == hardwareId && deviceType.indexOf("Temp + Humidity") >= 0) {
             DEBUG_PRINT("Found matching device");
             deviceId = String((const char*)device["idx"]);
         }
